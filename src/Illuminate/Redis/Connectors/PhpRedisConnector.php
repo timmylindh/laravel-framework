@@ -52,6 +52,7 @@ class PhpRedisConnector implements Connector
         $options = array_merge($options, $clusterOptions, Arr::pull($config, 'options', []));
 
         if (isset($options['scheme'])) {
+            // The + operator adds scheme only when the server entry doesn't already define one.
             $config = array_map(fn ($server) => $server + ['scheme' => $options['scheme']], $config);
         }
 
@@ -185,7 +186,7 @@ class PhpRedisConnector implements Connector
         if (version_compare(phpversion('redis'), '5.3.0', '>=')) {
             $context = Arr::get($config, 'context') ?? Arr::get($config, 'ssl');
 
-            if (! is_null($context)) {
+            if (is_array($context)) {
                 $parameters[] = $this->normalizeContext($context);
             }
         }
@@ -217,7 +218,7 @@ class PhpRedisConnector implements Connector
         if (version_compare(phpversion('redis'), '5.3.2', '>=')) {
             $context = Arr::get($options, 'context') ?? Arr::get($options, 'ssl');
 
-            if (! is_null($context)) {
+            if (is_array($context)) {
                 $parameters[] = $this->normalizeClusterContext($context);
             }
         }
@@ -286,6 +287,10 @@ class PhpRedisConnector implements Connector
 
     /**
      * Normalize the SSL context for a RedisCluster connection.
+     *
+     * Unlike single connections, RedisCluster expects flat SSL options that are
+     * passed directly to stream_context_create, so nested wrappers like 'ssl'
+     * or 'stream' are unwrapped and sibling keys like 'auth' are discarded.
      *
      * @param  array  $context
      * @return array

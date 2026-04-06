@@ -3,7 +3,6 @@
 namespace Illuminate\Tests\Redis;
 
 use Illuminate\Redis\Connectors\PhpRedisConnector;
-use Illuminate\Redis\Connectors\PredisConnector;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 
@@ -11,14 +10,11 @@ class PhpRedisConnectorTest extends TestCase
 {
     protected PhpRedisConnector $phpRedisConnector;
 
-    protected PredisConnector $predisConnector;
-
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->phpRedisConnector = new PhpRedisConnector;
-        $this->predisConnector = new PredisConnector;
     }
 
     // --- PhpRedis: normalizeContext (single connection) ---
@@ -145,123 +141,6 @@ class PhpRedisConnectorTest extends TestCase
         ]);
 
         $this->assertSame(['verify_peer' => false], $result);
-    }
-
-    // --- Predis: unified ssl/scheme in connect ---
-
-    public function testPredisConnectMergesUnifiedSslIntoConfig()
-    {
-        $connector = new class extends PredisConnector {
-            public ?array $capturedConfig = null;
-
-            public function connect(array $config, array $options)
-            {
-                $this->capturedConfig = $config;
-
-                // Don't actually connect
-                throw new \RuntimeException('intercepted');
-            }
-        };
-
-        // Call the parent connect logic by inlining the relevant parts
-        $config = ['host' => '127.0.0.1', 'port' => 6379];
-        $options = ['ssl' => ['verify_peer' => false], 'scheme' => 'tls'];
-
-        // Simulate what connect() does before creating the client
-        if (isset($options['scheme']) && ! isset($config['scheme'])) {
-            $config['scheme'] = $options['scheme'];
-        }
-        if (isset($options['ssl']) && ! isset($config['ssl'])) {
-            $config['ssl'] = $options['ssl'];
-        }
-
-        $this->assertSame('tls', $config['scheme']);
-        $this->assertSame(['verify_peer' => false], $config['ssl']);
-    }
-
-    public function testPredisConnectDoesNotOverrideExplicitConfig()
-    {
-        $config = ['host' => '127.0.0.1', 'port' => 6379, 'scheme' => 'tcp', 'ssl' => ['cafile' => '/custom']];
-        $options = ['ssl' => ['verify_peer' => false], 'scheme' => 'tls'];
-
-        if (isset($options['scheme']) && ! isset($config['scheme'])) {
-            $config['scheme'] = $options['scheme'];
-        }
-        if (isset($options['ssl']) && ! isset($config['ssl'])) {
-            $config['ssl'] = $options['ssl'];
-        }
-
-        $this->assertSame('tcp', $config['scheme']);
-        $this->assertSame(['cafile' => '/custom'], $config['ssl']);
-    }
-
-    // --- Predis: unified ssl/scheme in connectToCluster ---
-
-    public function testPredisClusterPromotesSslToParameters()
-    {
-        $connector = new class extends PredisConnector {
-            public ?array $capturedOptions = null;
-
-            public function connectToCluster(array $config, array $clusterOptions, array $options)
-            {
-                $clusterSpecificOptions = [];
-                $mergedOptions = array_merge($options, $clusterOptions, $clusterSpecificOptions);
-
-                if (isset($options['ssl']) || isset($options['scheme'])) {
-                    $parameters = $mergedOptions['parameters'] ?? [];
-
-                    if (isset($options['ssl']) && ! isset($parameters['ssl'])) {
-                        $parameters['ssl'] = $options['ssl'];
-                    }
-                    if (isset($options['scheme']) && ! isset($parameters['scheme'])) {
-                        $parameters['scheme'] = $options['scheme'];
-                    }
-
-                    $mergedOptions['parameters'] = $parameters;
-                }
-
-                $this->capturedOptions = $mergedOptions;
-
-                throw new \RuntimeException('intercepted');
-            }
-        };
-
-        try {
-            $connector->connectToCluster(
-                [['host' => '127.0.0.1', 'port' => 7001]],
-                [],
-                ['ssl' => ['verify_peer' => false], 'scheme' => 'tls']
-            );
-        } catch (\RuntimeException) {
-        }
-
-        $this->assertSame(['verify_peer' => false], $connector->capturedOptions['parameters']['ssl']);
-        $this->assertSame('tls', $connector->capturedOptions['parameters']['scheme']);
-    }
-
-    public function testPredisClusterDoesNotOverrideExplicitParameters()
-    {
-        $options = [
-            'ssl' => ['verify_peer' => false],
-            'scheme' => 'tls',
-            'parameters' => [
-                'ssl' => ['cafile' => '/custom'],
-                'scheme' => 'tcp',
-            ],
-        ];
-
-        $mergedOptions = $options;
-        $parameters = $mergedOptions['parameters'] ?? [];
-
-        if (isset($options['ssl']) && ! isset($parameters['ssl'])) {
-            $parameters['ssl'] = $options['ssl'];
-        }
-        if (isset($options['scheme']) && ! isset($parameters['scheme'])) {
-            $parameters['scheme'] = $options['scheme'];
-        }
-
-        $this->assertSame(['cafile' => '/custom'], $parameters['ssl']);
-        $this->assertSame('tcp', $parameters['scheme']);
     }
 
     // --- Helpers ---
