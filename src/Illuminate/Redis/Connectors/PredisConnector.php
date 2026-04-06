@@ -33,6 +33,14 @@ class PredisConnector implements Connector
             $config['host'] = Str::after($config['host'], 'tls://');
         }
 
+        if (isset($options['scheme']) && ! isset($config['scheme'])) {
+            $config['scheme'] = $options['scheme'];
+        }
+
+        if (isset($options['ssl']) && ! isset($config['ssl'])) {
+            $config['ssl'] = $options['ssl'];
+        }
+
         return new PredisConnection(new Client($config, $formattedOptions));
     }
 
@@ -52,8 +60,22 @@ class PredisConnector implements Connector
             $clusterSpecificOptions['prefix'] = $config['prefix'];
         }
 
-        return new PredisClusterConnection(new Client(array_values($config), array_merge(
-            $options, $clusterOptions, $clusterSpecificOptions
-        )));
+        $mergedOptions = array_merge($options, $clusterOptions, $clusterSpecificOptions);
+
+        if (isset($options['ssl']) || isset($options['scheme'])) {
+            $parameters = $mergedOptions['parameters'] ?? [];
+
+            if (isset($options['ssl']) && ! isset($parameters['ssl'])) {
+                $parameters['ssl'] = $options['ssl'];
+            }
+
+            if (isset($options['scheme']) && ! isset($parameters['scheme'])) {
+                $parameters['scheme'] = $options['scheme'];
+            }
+
+            $mergedOptions['parameters'] = $parameters;
+        }
+
+        return new PredisClusterConnection(new Client(array_values($config), $mergedOptions));
     }
 }

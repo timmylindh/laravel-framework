@@ -51,6 +51,10 @@ class PhpRedisConnector implements Connector
     {
         $options = array_merge($options, $clusterOptions, Arr::pull($config, 'options', []));
 
+        if (isset($options['scheme'])) {
+            $config = array_map(fn ($server) => $server + ['scheme' => $options['scheme']], $config);
+        }
+
         return new PhpRedisClusterConnection($this->createRedisClusterInstance(
             array_map($this->buildClusterConnectionString(...), $config), $options
         ));
@@ -178,8 +182,12 @@ class PhpRedisConnector implements Connector
             $parameters[] = Arr::get($config, 'read_timeout', 0.0);
         }
 
-        if (version_compare(phpversion('redis'), '5.3.0', '>=') && ! is_null($context = Arr::get($config, 'context'))) {
-            $parameters[] = $context;
+        if (version_compare(phpversion('redis'), '5.3.0', '>=')) {
+            $context = Arr::get($config, 'context') ?? Arr::get($config, 'ssl');
+
+            if (! is_null($context)) {
+                $parameters[] = $this->normalizeContext($context);
+            }
         }
 
         $client->{$persistent ? 'pconnect' : 'connect'}(...$parameters);
@@ -206,8 +214,12 @@ class PhpRedisConnector implements Connector
             $parameters[] = $options['password'] ?? null;
         }
 
-        if (version_compare(phpversion('redis'), '5.3.2', '>=') && ! is_null($context = Arr::get($options, 'context'))) {
-            $parameters[] = $context;
+        if (version_compare(phpversion('redis'), '5.3.2', '>=')) {
+            $context = Arr::get($options, 'context') ?? Arr::get($options, 'ssl');
+
+            if (! is_null($context)) {
+                $parameters[] = $this->normalizeClusterContext($context);
+            }
         }
 
         return tap(new RedisCluster(...$parameters), function ($client) use ($options) {
@@ -239,6 +251,56 @@ class PhpRedisConnector implements Connector
                 $client->setOption(Redis::OPT_TCP_KEEPALIVE, $options['tcp_keepalive']);
             }
         });
+    }
+
+    /**
+     * Normalize the SSL context for a single Redis connection.
+     *
+     * @param  array  $context
+     * @return array
+     */
+    protected function normalizeContext(array $context)
+    {
+        if (isset($context['stream'])) {
+            return $context;
+        }
+
+        $normalized = [];
+
+        if (isset($context['auth'])) {
+            $normalized['auth'] = $context['auth'];
+        }
+
+        if (isset($context['ssl']) && is_array($context['ssl'])) {
+            $normalized['stream'] = $context['ssl'];
+        } else {
+            $sslOptions = array_diff_key($context, array_flip(['auth']));
+
+            if (! empty($sslOptions)) {
+                $normalized['stream'] = $sslOptions;
+            }
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Normalize the SSL context for a RedisCluster connection.
+     *
+     * @param  array  $context
+     * @return array
+     */
+    protected function normalizeClusterContext(array $context)
+    {
+        if (isset($context['ssl']) && is_array($context['ssl'])) {
+            return $context['ssl'];
+        }
+
+        if (isset($context['stream']) && is_array($context['stream'])) {
+            return $context['stream'];
+        }
+
+        return $context;
     }
 
     /**
